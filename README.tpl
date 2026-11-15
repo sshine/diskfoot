@@ -37,8 +37,9 @@ mount information.
   `(path, options)`. `r` clears it.
 
 Rows start as `pending`. A directory that has not been expanded has not been
-walked; a `partial` row was measured only to the requested depth; an `error` row
-could not be read, and the reason appears in the status line.
+walked; a `partial` row could not be fully measured (depth limit, an entry on
+another filesystem, or a read error); an `error` row could not be read, and the
+reason appears in the status line.
 
 ## Fast paths, and the ext4 fallback
 

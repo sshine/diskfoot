@@ -36,8 +36,10 @@
 //! | `x` | toggle crossing filesystem boundaries |
 //!
 //! Rows begin as `pending`. A directory that has not been expanded has not been
-//! walked; a `partial` row was measured only to the requested depth; an
-//! `error` row could not be read, and the reason appears in the status line.
+//! walked; a `partial` row could not be fully measured, whether because the JSON
+//! depth limit was reached, an entry lived on another filesystem, or a read
+//! failed; an `error` row could not be read, and the reason appears in the
+//! status line.
 //!
 //! ## Size engine
 //!
