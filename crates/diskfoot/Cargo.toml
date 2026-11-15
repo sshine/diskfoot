@@ -1,0 +1,25 @@
+[package]
+name = "diskfoot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "df, du and ncdu in one lazy disk-usage CLI/TUI"
+readme = "../../README.md"
+keywords = ["disk-usage", "tui", "cli", "df", "du"]
+categories = ["command-line-utilities", "filesystem"]
+
+[lints]
+workspace = true
+
+[dependencies]
+clap.workspace = true
+crossterm.workspace = true
+libc.workspace = true
+ratatui.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
