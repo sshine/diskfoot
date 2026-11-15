@@ -230,8 +230,8 @@ dist-hashes:
     done
 
 # Refuses unless the tree is clean, HEAD is exactly origin/main, the tag exists
-# neither locally nor on origin, the manifest carries {{version}}, and the CI
-# workflow's latest run on main is green.
+# neither locally nor on origin, the manifest carries the tagged version, and
+# the CI workflow's latest run on main is green.
 tag version: (check-version version)
     #!/usr/bin/env bash
     set -euo pipefail

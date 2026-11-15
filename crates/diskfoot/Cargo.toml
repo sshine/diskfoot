@@ -8,6 +8,8 @@ description = "df, du and ncdu in one lazy disk-usage CLI/TUI"
 readme = "../../README.md"
 keywords = ["disk-usage", "tui", "cli", "df", "du"]
 categories = ["command-line-utilities", "filesystem"]
+# Binary-only: releases are tarballs, and `cargo publish` must not be possible.
+publish = false
 
 [lints]
 workspace = true
