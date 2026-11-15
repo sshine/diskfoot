@@ -46,8 +46,13 @@
       inputs.import-tree.follows = "import-tree";
     };
 
-    # The CI phase adds hashpinner here. Every input that takes nixpkgs follows
-    # it; hk-nix also follows flake-parts, treefmt-nix and import-tree.
+    hashpinner = {
+      url = "github:sshine/hashpinner";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # Every input that takes nixpkgs follows it; hk-nix also follows
+    # flake-parts, treefmt-nix and import-tree.
   };
 
   outputs =

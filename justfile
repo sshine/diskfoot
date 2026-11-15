@@ -48,6 +48,14 @@ readme-check:
 lock-check:
     cargo metadata --locked --format-version 1 > /dev/null
 
+# Pin every action reference, actions/* included, and annotate each with its release
+pin *args='':
+    hashpinner --pin --no-allow {{args}}
+
+# Fail if a reference is unpinned or a version comment does not match its commit
+pin-check:
+    hashpinner --check --deep --no-allow
+
 # Takes an explicit semver (`just bump 0.2.0`) or a release kind (`just bump
 # minor`). The version has one home, [workspace.package]; the single member
 # inherits it.
