@@ -148,3 +148,131 @@ ci: fmt-check lint lint-nix test doc readme-check lock-check build
 # Clean build artifacts
 clean:
     cargo clean
+
+# ---------------------------------------------------------------------------
+# Release recipes.
+#
+# The tag is the version. One workspace member inherits [workspace.package];
+# `cargo pkgid` is what the tag is compared against. Linux musl only: diskfoot
+# uses statx and Linux filesystem APIs, so there is no macOS target.
+# ---------------------------------------------------------------------------
+
+crate := "diskfoot"
+release_repo := "sshine/diskfoot"
+release_targets := "x86_64-unknown-linux-musl aarch64-unknown-linux-musl"
+
+# The CI workflow whose latest run on main must be green before tagging.
+ci_workflow := "ci.yml"
+
+# The URL the `tag` recipe prints when it cannot read CI state itself.
+ci_url := "https://github.com/sshine/diskfoot/actions?query=branch%3Amain"
+
+# Assert the release tag names the version cargo would publish
+check-version version:
+    @pkgid="$(cargo pkgid -p {{crate}})"; crate="v${pkgid##*#}"; \
+    if [ "$crate" != "{{version}}" ]; then \
+        echo "tag {{version}} does not match crate version $crate" >&2; exit 1; \
+    fi
+
+# Build one target into dist/ without clearing it
+dist-target version target: (check-version version)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p dist
+    cargo build --release --locked --target "{{target}}" -p {{crate}}
+    name="{{crate}}-{{version}}-{{target}}"
+    tar -czf "dist/$name.tar.gz" -C "target/{{target}}/release" {{crate}}
+    ( cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256" )
+
+# Build the static release artifacts and their checksums into dist/
+dist-linux version: (check-version version)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf dist && mkdir -p dist
+    for target in {{release_targets}}; do
+        just dist-target "{{version}}" "$target"
+    done
+    ls -1 dist
+
+# Print the SRI hashes nix/binary.nix pins, read from the published release
+release-hashes version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for target in {{release_targets}}; do
+        case "$target" in
+            x86_64-*) system="x86_64-linux" ;;
+            aarch64-*) system="aarch64-linux" ;;
+            *) echo "no Nix system name for $target" >&2; exit 1 ;;
+        esac
+        url="https://github.com/{{release_repo}}/releases/download/{{version}}/{{crate}}-{{version}}-$target.tar.gz"
+        hash="$(nix store prefetch-file --json --hash-type sha256 "$url" | jq -r .hash)"
+        printf '"%s" = "%s";\n' "$system" "$hash"
+    done
+
+# Print the same SRI lines from a local dist/, for an offline check. Only correct
+# when dist/ holds the bytes the release published.
+dist-hashes:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for target in {{release_targets}}; do
+        case "$target" in
+            x86_64-*) system="x86_64-linux" ;;
+            aarch64-*) system="aarch64-linux" ;;
+            *) echo "no Nix system name for $target" >&2; exit 1 ;;
+        esac
+        archive=(dist/{{crate}}-*-"$target".tar.gz)
+        if [ ! -e "${archive[0]}" ]; then
+            echo "no tarball for $target in dist/" >&2
+            exit 1
+        fi
+        hash="$(nix hash file --sri --type sha256 "${archive[0]}")"
+        printf '"%s" = "%s";\n' "$system" "$hash"
+    done
+
+# Refuses unless the tree is clean, HEAD is exactly origin/main, the tag exists
+# neither locally nor on origin, the manifest carries {{version}}, and the CI
+# workflow's latest run on main is green.
+tag version: (check-version version)
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag="{{version}}"
+
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "working tree is dirty; commit or stash first" >&2
+        exit 1
+    fi
+    if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
+        echo "not on main; a release tag names a commit on main" >&2
+        exit 1
+    fi
+
+    git fetch --quiet origin main
+    git fetch --quiet --tags origin
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+        echo "HEAD is not origin/main; push main, or check out the commit main points at" >&2
+        exit 1
+    fi
+    if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+        echo "tag $tag already exists locally" >&2
+        exit 1
+    fi
+    if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+        echo "tag $tag already exists on origin" >&2
+        exit 1
+    fi
+
+    if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+        conclusion="$(gh run list --branch main --workflow "{{ci_workflow}}" --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
+        if [ "$conclusion" != "success" ]; then
+            echo "the latest run on main concluded '${conclusion:-none}'; wait for green:" >&2
+            gh run list --branch main --limit 5
+            exit 1
+        fi
+    elif [ "${CONFIRM:-}" != "green" ]; then
+        echo "gh is not available, so main's CI state cannot be read." >&2
+        echo "Check {{ci_url}} and rerun with CONFIRM=green." >&2
+        exit 1
+    fi
+
+    git tag -a "$tag" -m "$tag"
+    git push origin "$tag"

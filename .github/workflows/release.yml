@@ -1,0 +1,114 @@
+name: Release
+
+# One tag, one release. The tag names a commit main has already built, so the Nix cache
+# below restores rather than compiles. A tag pushed before main is green makes two jobs
+# compete for the same key instead of one restoring the other's work.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Fails in seconds on a mistyped tag, then runs the same checks main runs. Everything
+  # downstream waits on this, so a tag cannot publish what CI would have rejected.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, 2026-07-17
+      - uses: ./.github/actions/setup-nix
+      - name: Tag matches the manifest version
+        run: nix develop -c just check-version "${GITHUB_REF_NAME}"
+      - name: Build, test and lint
+        run: nix develop -c just ci
+
+  # Drafted up front so each build uploads straight to it. A draft is invisible until
+  # the last job publishes it, so a matrix leg that fails leaves nothing half-released.
+  # Re-runnable: a retried job reuses the draft instead of failing on an existing name.
+  draft:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, 2026-07-17
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "release ${GITHUB_REF_NAME} already exists; reusing it"
+          else
+            gh release create "${GITHUB_REF_NAME}" \
+              --draft --generate-notes --title "${GITHUB_REF_NAME}"
+          fi
+
+  # musl rather than gnu: one static binary covers Debian, Alpine and NixOS alike.
+  # Both targets come from the Nix devshell. The aarch64 target is cross-built on this
+  # x86_64 runner with the linker from nix/release.nix. Linux only: diskfoot uses statx.
+  linux:
+    needs: draft
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, 2026-07-17
+      - uses: ./.github/actions/setup-nix
+      - name: Build the static musl tarballs
+        run: nix develop -c just dist-linux "${GITHUB_REF_NAME}"
+
+      # The artifact that ships, not a host-native build that might differ. The aarch64
+      # tarball cannot run on this runner; it is extracted and its sidecar verified, and
+      # that is the whole of what CI proves about it.
+      - name: Smoke-test the x86_64 tarball
+        run: |
+          set -euo pipefail
+          stem="diskfoot-${GITHUB_REF_NAME}-x86_64-unknown-linux-musl"
+          tar -xzf "dist/${stem}.tar.gz" -C /tmp
+          /tmp/diskfoot --version
+          ( cd dist && sha256sum --check "${stem}.tar.gz.sha256" )
+          tar -tzf "dist/diskfoot-${GITHUB_REF_NAME}-aarch64-unknown-linux-musl.tar.gz" > /dev/null
+
+      # Per-job sidecars, computed over the tarball this job built, so the checksum and
+      # the asset come from the same bytes. --clobber makes a retry replace rather than
+      # add a second copy.
+      - name: Attach the tarballs to the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/*.tar.gz dist/*.tar.gz.sha256 --clobber
+
+  # Last, so nothing is visible until both build legs and the checksums are in place.
+  # crates.io publishing is deliberately absent: diskfoot is distributed as a binary.
+  publish:
+    needs:
+      - linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, 2026-07-17
+      - uses: ./.github/actions/setup-nix
+
+      # Nothing irreversible happens until the assets on the draft are complete.
+      - name: Every tarball has its sidecar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          names="$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name')"
+          for name in $names; do
+            case "$name" in
+              *.tar.gz)
+                echo "$names" | grep -qx "$name.sha256" \
+                  || { echo "no sidecar for $name" >&2; exit 1; }
+                ;;
+            esac
+          done
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false
