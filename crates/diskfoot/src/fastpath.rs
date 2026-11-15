@@ -48,14 +48,6 @@ impl FsKind {
             _ => None,
         }
     }
-
-    pub const fn source(self) -> SizeSource {
-        match self {
-            Self::Btrfs => SizeSource::Btrfs,
-            Self::Zfs => SizeSource::Zfs,
-            Self::Xfs => SizeSource::Xfs,
-        }
-    }
 }
 
 /// What is known about the target before a command runs.
@@ -377,21 +369,6 @@ fn xfs_project_id(path: &Path) -> Option<u32> {
     }
 }
 
-/// The mounted filesystem type for a path, or `None` if the mount table does
-/// not cover it.
-pub fn fstype(path: &Path) -> Option<String> {
-    let mounts = Mounts::read().ok()?;
-    mounts.find(path).map(|m| m.fs_type.clone())
-}
-
-/// Exposed for diagnostics: whether a generic walk would be used.
-pub fn has_fast_path(path: &Path) -> bool {
-    fstype(path)
-        .as_deref()
-        .and_then(FsKind::from_fstype)
-        .is_some()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,7 +387,6 @@ mod tests {
         assert_eq!(FsKind::from_fstype("zfs"), Some(FsKind::Zfs));
         assert_eq!(FsKind::from_fstype("xfs"), Some(FsKind::Xfs));
         assert_eq!(FsKind::from_fstype("ext4"), None);
-        assert!(!has_fast_path(Path::new(".")));
     }
 
     #[test]
@@ -437,10 +413,10 @@ mod tests {
 	Parent ID: 		5
 "#;
 
-    const QGROUPS: &str = r#"qgroupid         rfer         excl
---------         ----         ----
-0/5          16384        16384
-0/256      8388608      6291456
+    const QGROUPS: &str = r#"qgroupid         rfer         excl     max_rfer     max_excl
+--------         ----         ----     --------     --------
+0/5          16384        16384            0            0
+0/256      8388608      6291456            0            0
 "#;
 
     #[test]
