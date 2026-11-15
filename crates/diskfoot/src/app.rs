@@ -528,8 +528,8 @@ fn render_help(frame: &mut Frame, area: Rect) {
         Line::from("x            cross filesystem boundaries"),
         Line::from(""),
         Line::from("Sizes begin as pending. Only an expanded directory is walked."),
-        Line::from("btrfs, ZFS and XFS answer with their own summary when applicable;"),
-        Line::from("ext4 and everything else use the generic statx walk."),
+        Line::from("A fast path is used only at a btrfs subvolume root, a ZFS dataset"),
+        Line::from("root, or an XFS project quota. Everything else uses exact statx."),
     ];
     let paragraph = Paragraph::new(lines)
         .block(Block::bordered().title(" help "))

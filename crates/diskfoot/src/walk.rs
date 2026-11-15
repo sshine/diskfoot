@@ -54,11 +54,11 @@ impl Kind {
 pub enum SizeSource {
     /// Generic `statx` walk: both allocated and apparent bytes are known.
     Statx,
-    /// btrfs reported the exclusive bytes for a subvolume.
+    /// btrfs qgroup `rfer` for a subvolume root; includes shared extents.
     Btrfs,
-    /// ZFS reported the used bytes for a dataset.
+    /// ZFS `used` for a dataset, at its mount point.
     Zfs,
-    /// XFS reported the used bytes for a project quota.
+    /// XFS project-quota used blocks for the whole project.
     Xfs,
 }
 
@@ -226,9 +226,10 @@ impl Walk {
             return node;
         }
 
-        // A fast path answers "how many bytes does this subtree occupy?" from
-        // the filesystem's own accounting, but cannot list children and cannot
-        // supply apparent bytes. Only use it for an unbounded, allocated walk.
+        // A filesystem-level summary (btrfs qgroup at a subvolume root, ZFS
+        // dataset usage, XFS project quota) can answer only at its own boundary,
+        // not for an arbitrary directory. It supplies allocated bytes only and
+        // cannot list children, so use it only for an unbounded allocated walk.
         if allow_fast
             && remaining.is_none()
             && self.options.allocated

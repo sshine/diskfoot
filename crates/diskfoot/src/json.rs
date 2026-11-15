@@ -19,7 +19,8 @@ pub struct JsonReport {
     pub filesystem: FilesystemSummary,
     /// Allocated bytes for the root at the requested depth (`st_blocks * 512`).
     pub allocated_bytes: u64,
-    /// Apparent bytes, or `null` when a filesystem fast path supplied only used bytes.
+    /// Apparent bytes, or `null` when a filesystem-level fast path supplied
+    /// only its own accounting number.
     pub apparent_bytes: Option<u64>,
     pub size_source: &'static str,
     pub complete: bool,

@@ -43,25 +43,35 @@ reason appears in the status line.
 
 ## Fast paths, and the ext4 fallback
 
-Before walking, `diskfoot` checks whether the filesystem can answer from its own
-accounting. The fast path is used only for allocated sizes of a whole subtree.
+Three filesystems can answer from accounting they already maintain. These are
+filesystem-level summaries with a fixed scope, not scans of a directory tree:
+each applies only at the boundary named below. Everywhere else — including a
+directory inside one of those boundaries — `diskfoot` uses the exact generic
+`statx` walk.
 
-| Filesystem | Detected when | Command | Supplies | Tested on a real filesystem here |
+| Filesystem | Applies when | Command | Number used | Tested on a real filesystem here |
 | --- | --- | --- | --- | --- |
-| btrfs | `btrfs subvolume show <path>` succeeds | `btrfs filesystem du --raw` | allocated subtree bytes | no |
-| ZFS | the path is a dataset mount point | `zfs list -Hp -o name,used,avail,mountpoint` | used bytes | no |
-| XFS | `FS_IOC_FSGETXATTR` reports a project id | `xfs_quota -x -c 'quota -p -N -n -b -v <id>'` | used blocks × block size | no |
-| ext4 and everything else | always | generic `statx` walk | allocated and apparent | yes |
+| btrfs qgroup | the target is a subvolume root (inode 256), `btrfs subvolume show` reports its id, and quotas are enabled | `btrfs qgroup show -reF --raw <path>` | `rfer` for qgroup `0/<subvolid>`; referenced bytes include shared extents | no |
+| ZFS dataset | the target is exactly a dataset mount point | `zfs list -Hp -o name,used,avail,mountpoint` | the dataset's `used` bytes | no |
+| XFS project quota | the target inode has a non-zero project id | `xfs_quota -x -c 'quota -p -N -n -b -v <id>'` | used blocks × block size for the whole project | no |
+| ext4 and everything else | always | generic `statx` walk | exact allocated and apparent bytes for the directory and the subtree it walks | yes |
+
+The btrfs number is a qgroup's referenced bytes, not `du`'s exclusive total:
+shared extents are included. It is used only at the subvolume root, and only when
+quota groups are enabled; a directory inside a subvolume falls back.
+
+The ZFS number is the dataset's `used` property; a directory inside the dataset
+falls back. The XFS number is the project's quota usage; a path inside a project
+gets no per-directory shortcut, and the number may include files elsewhere in the
+same project. All three report allocated bytes only: apparent size would require
+walking, so such a row shows `—` (`null` in JSON) and keeps `size_source` honest:
+`statx`, `btrfs`, `zfs` or `xfs`.
 
 The development host is ext4, so only the generic path has been exercised
-end-to-end. The detection functions and every parser are unit-tested against
-fixture command output; no test requires a btrfs, ZFS or XFS filesystem. A
-missing tool, a non-zero exit, or output that does not parse quietly falls back
-to the generic walk.
-
-The fast paths report used bytes only; a directory's apparent size would require
-walking it. Such a row shows `—` for apparent size (`null` in JSON) and keeps
-`size_source` honest: `statx`, `btrfs`, `zfs` or `xfs`.
+end-to-end. Detection and every parser are unit-tested against fixture command
+output; no test requires a btrfs, ZFS or XFS filesystem. A missing tool, disabled
+quotas, a non-zero exit, or output that does not parse quietly falls back to the
+generic walk.
 
 ## CLI
 
